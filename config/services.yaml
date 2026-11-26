@@ -1,0 +1,28 @@
+# Contenedor de dependencias de libredte-lib-core.
+#
+# POR QUÉ EXISTE ESTE ARCHIVO
+# ---------------------------
+# El kernel de LibreDTE (Derafu\Kernel\MicroKernel) resuelve su directorio de
+# configuración como "<raíz del proyecto>/config", donde la raíz es el
+# directorio que contiene vendor/ — es decir, ESTE microservicio, no la
+# librería. Si el archivo no existe, el contenedor de dependencias se compila
+# vacío y cualquier llamada a getPackageRegistry() falla con:
+#
+#   You have requested a non-existent service
+#   "Derafu\Backbone\Contract\PackageRegistryInterface"
+#
+# ...lo que rompe TODA la emisión y el envío de DTE.
+#
+# Importamos el services.yaml de la librería, que a su vez importa los de
+# derafu/{xml,certificate,signature,mail}. Esas importaciones internas usan
+# rutas "../vendor/..." porque están escritas asumiendo que la librería es la
+# raíz del proyecto; el Dockerfile crea un symlink para que resuelvan bien.
+imports:
+  - { resource: "../vendor/libredte/libredte-lib-core/config/services.yaml" }
+
+services:
+  # Datos reales del emisor en lugar de los de SASCO SpA (ver src/EmisorProvider.php).
+  libredte\lib\Core\Package\Billing\Component\TradingParties\Contract\EmisorProviderInterface:
+    class: App\EmisorProvider
+    arguments:
+      $emisorFactory: '@libredte\lib\Core\Package\Billing\Component\TradingParties\Contract\EmisorFactoryInterface'

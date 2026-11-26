@@ -1,0 +1,7 @@
+/vendor/
+/.env
+/certs/*
+!/certs/.gitkeep
+/certs/*.pass
+/caf/*
+!/caf/.gitkeep

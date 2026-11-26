@@ -1,0 +1,204 @@
+{# Boleta electrónica (39). Mismo diseño que la factura (azul SII, recuadro rojo).
+   Motor: mPDF → maquetar con tablas y alinear con atributos align/valign.
+   Requisitos SII que NO se deben quitar: recuadro rojo con RUT, tipo y folio; "S.I.I. - <unidad>"
+   bajo el recuadro; timbre PDF417 con resolución y "Verifique documento: www.sii.cl"; sitio web
+   de consulta de la boleta (LIBREDTE_URL_CONSULTA_BOLETA → document_extra.url_consulta_boleta).
+   La boleta no lleva acuse de recibo ni versión cedible.
+   Los precios de los ítems de una boleta incluyen IVA; el IVA se informa como dato aparte.
+   Datos que agrega DteEmisor::prepararRender(): document_auth (resolución) y document_extra
+   (monto_palabras, logo, url_consulta_boleta). #}
+{% macro pesos(valor) -%}
+    {%- if valor is not same as(null) -%}$ {{ valor | number_format(0, ',', '.') }}{%- endif -%}
+{%- endmacro %}
+{% import _self as m %}
+{% set enc = document.Encabezado %}
+{% set detalles = document.Detalle ?? [] %}
+{% set monto_palabras = document_extra.monto_palabras ?? null %}
+{% set hayCantidad = detalles | filter(d => d.QtyItem is defined and d.QtyItem is not empty) | length > 0 %}
+{% set hayPrecio = detalles | filter(d => d.PrcItem is defined and d.PrcItem is not empty) | length > 0 %}
+{% set hayDescuento = detalles | filter(d => (d.DescuentoMonto is defined and d.DescuentoMonto is not empty) or (d.DescuentoPct is defined and d.DescuentoPct is not empty)) | length > 0 %}
+{% set hayReceptor = enc.Receptor is not empty and enc.Receptor.RUTRecep is not empty and enc.Receptor.RUTRecep != '66666666-6' %}
+<html>
+<head>
+    <style>
+        @page { size: 216mm 279mm; margin: 10mm 10mm 12mm 10mm; }
+        body { font-family: Arial, Helvetica, sans-serif; font-size: 8.8pt; color: #000000; }
+        p { margin: 0; }
+        table { border-collapse: collapse; }
+
+        .cabecera { width: 100%; }
+        .cabecera td { vertical-align: top; padding: 0; }
+        .logo { width: 32mm; height: auto; }
+        .emisor td { padding: 0.5mm 0; font-size: 8.3pt; color: #000080; }
+        .emisor .razon { font-size: 14pt; font-weight: bold; letter-spacing: 0.3pt; padding-bottom: 1.2mm; }
+        .emisor .giro { font-weight: bold; padding-bottom: 1mm; }
+        .emisor .contacto { padding-top: 1mm; }
+
+        .recuadro { width: 100%; border: 0.6mm solid #FF0000; }
+        .recuadro td { text-align: center; color: #FF0000; font-weight: bold; font-size: 12.5pt; padding: 1.4mm 2mm; }
+        .recuadro .primera { padding-top: 4mm; }
+        .recuadro .ultima { padding-bottom: 4mm; }
+        .unidad-sii { color: #FF0000; font-weight: bold; font-size: 9pt; padding-top: 2.5mm; }
+
+        .cliente { width: 100%; border: 0.3mm solid #000080; margin-top: 4mm; }
+        .cliente td { padding: 1mm 2.5mm; vertical-align: top; }
+        .cliente .k { font-weight: bold; color: #000080; white-space: nowrap; width: 17%; font-size: 8pt; }
+        .cliente .kd { font-weight: bold; color: #000080; white-space: nowrap; font-size: 8pt; }
+        .cliente .vd { text-align: right; white-space: nowrap; }
+        .cliente .pad-top td { padding-top: 2.5mm; }
+        .cliente .pad-bottom td { padding-bottom: 2.5mm; }
+
+        .detalle { width: 100%; margin-top: 5mm; }
+        .detalle th { white-space: nowrap; font-weight: bold; font-size: 8pt; text-align: left; color: #000000; padding: 2mm 2.5mm; border-top: 0.3mm solid #000080; border-bottom: 0.3mm solid #000080; }
+        .detalle td { padding: 2.2mm 2.5mm; vertical-align: top; }
+        .detalle .num { text-align: right; white-space: nowrap; }
+        .detalle .desc { font-size: 7.8pt; color: #444444; padding-top: 0.6mm; }
+        .fin-detalle { border-top: 0.4mm solid #000080; margin-top: 0; }
+
+        .pie { position: absolute; left: 10mm; right: 10mm; bottom: 12mm; }
+        .son { width: 100%; margin-bottom: 3mm; font-size: 8.3pt; }
+        .son .k { font-weight: bold; color: #000080; width: 9mm; white-space: nowrap; }
+        .pie-tabla { width: 100%; }
+        .pie-tabla > tbody > tr > td { padding: 0; }
+        .img-timbre { width: 64mm; height: 31mm; }
+        .timbre-leyenda { font-size: 7.5pt; padding-top: 1mm; }
+        .consulta { margin-top: 3mm; font-size: 8pt; color: #000080; }
+
+        .totales { width: 100%; border: 0.3mm solid #000080; }
+        .totales td { padding: 1.3mm 4mm; white-space: nowrap; }
+        .totales .k { font-weight: bold; color: #000080; font-size: 8.3pt; }
+        .totales .v { text-align: right; }
+        .totales .primera td { padding-top: 3mm; }
+        .totales .ultima td { padding-bottom: 3mm; }
+        .totales .total td { font-size: 11pt; font-weight: bold; color: #000000; }
+        .totales .total .k { color: #000000; font-size: 10pt; }
+        .iva-incluido { margin-top: 2mm; font-size: 7.8pt; color: #444444; text-align: right; }
+    </style>
+</head>
+<body>
+
+{# ── Cabecera: logo · emisor · recuadro SII ── #}
+<table class="cabecera">
+    <tr>
+        <td style="width: 17%;" valign="middle">
+            {% if document_extra.logo is defined and document_extra.logo is not empty %}<img src="{{ document_extra.logo }}" alt="Logo" class="logo">{% endif %}
+        </td>
+        <td style="width: 46%; padding-left: 4mm;" valign="middle">
+            {% set telefono = enc.Emisor.Telefono is iterable ? enc.Emisor.Telefono | join(' / ') : enc.Emisor.Telefono %}
+            <table class="emisor">
+                <tr><td class="razon">{{ enc.Emisor.RznSoc | default(enc.Emisor.RznSocEmisor) }}</td></tr>
+                <tr><td class="giro">{{ enc.Emisor.GiroEmis | default(enc.Emisor.GiroEmisor) }}</td></tr>
+                <tr><td>{{ enc.Emisor.DirOrigen }}</td></tr>
+                <tr><td>{{ [enc.Emisor.CmnaOrigen | lower | title, enc.Emisor.CiudadOrigen is not empty ? enc.Emisor.CiudadOrigen | lower | title : ''] | filter(v => v is not empty) | join(', ') }}</td></tr>
+                {% if enc.Emisor.CorreoEmisor is not empty %}<tr><td class="contacto">E-mail: {{ enc.Emisor.CorreoEmisor }}</td></tr>{% endif %}
+                {% if telefono is not empty %}<tr><td>Teléfono: {{ telefono }}</td></tr>{% endif %}
+            </table>
+        </td>
+        <td style="width: 37%;">
+            <table class="recuadro">
+                <tr><td class="primera">R.U.T.: {{ enc.Emisor.RUTEmisor | format_as('billing_document.RUTEmisor') }}</td></tr>
+                <tr><td>BOLETA ELECTRÓNICA</td></tr>
+                <tr><td class="ultima">N° {{ enc.IdDoc.Folio }}</td></tr>
+            </table>
+            <table style="width: 100%;"><tr><td class="unidad-sii" align="center">S.I.I. - {{ enc.Emisor.CmnaOrigen | format_as('billing_document.CdgSIISucur') | upper }}</td></tr></table>
+        </td>
+    </tr>
+</table>
+
+{# ── Fecha (y receptor, solo si la boleta lo trae: normalmente es venta al público) ── #}
+{% set filas = [] %}
+{% if hayReceptor %}
+    {% if enc.Receptor.RznSocRecep is not empty %}{% set filas = filas | merge([['SEÑOR(ES):', enc.Receptor.RznSocRecep]]) %}{% endif %}
+    {% set filas = filas | merge([['RUT:', enc.Receptor.RUTRecep | format_as('billing_document.RUTRecep')]]) %}
+    {% if enc.Receptor.DirRecep is not empty %}{% set filas = filas | merge([['DIRECCIÓN:', enc.Receptor.DirRecep]]) %}{% endif %}
+    {% if enc.Receptor.CmnaRecep is not empty %}{% set filas = filas | merge([['COMUNA:', enc.Receptor.CmnaRecep]]) %}{% endif %}
+{% endif %}
+{% for ref in document.Referencia ?? [] %}
+    {# En boleta el set va en CodRef (<CodRef>SET</CodRef>); TpoDocRef se deja por compatibilidad. #}
+    {% set esSet = (ref.CodRef is defined and ref.CodRef == 'SET') or (ref.TpoDocRef is defined and ref.TpoDocRef == 'SET') %}
+    {% if esSet %}{% set filas = filas | merge([['REFERENCIA:', 'Set de pruebas SII: ' ~ ref.RazonRef]]) %}{% endif %}
+{% endfor %}
+{% set fechas = [['FECHA EMISIÓN:', enc.IdDoc.FchEmis | date('d/m/Y')]] %}
+{% set nFilas = max(filas | length, fechas | length) %}
+<table class="cliente">
+    {% for i in 0..(nFilas - 1) %}
+        {% set f = filas[i] ?? null %}
+        {% set d = fechas[i] ?? null %}
+        <tr class="{{ i == 0 ? 'pad-top' : '' }} {{ i == nFilas - 1 ? 'pad-bottom' : '' }}">
+            <td class="k">{{ f ? f[0] : '' }}</td>
+            <td style="width: 46%;">{{ f ? f[1] : '' }}</td>
+            <td class="kd" style="width: 20%;">{{ d ? d[0] : '' }}</td>
+            <td class="vd" style="width: 14%;">{{ d ? d[1] : '' }}</td>
+        </tr>
+    {% endfor %}
+</table>
+
+{# ── Detalle ── #}
+<table class="detalle">
+    <tr>
+        <th>Item</th>
+        {% if hayPrecio %}<th class="num" style="width: 16%; text-align: right;">Valor Unitario</th>{% endif %}
+        {% if hayCantidad %}<th class="num" style="width: 11%; text-align: right;">Cantidad</th>{% endif %}
+        {% if hayDescuento %}<th class="num" style="width: 19%; text-align: right;">Descuento</th>{% endif %}
+        <th class="num" style="width: 15%; text-align: right;">Subtotal</th>
+    </tr>
+    {% for d in detalles %}
+        <tr>
+            <td>
+                {{ d.NmbItem | default('') }}{% if d.IndExe is not empty and d.IndExe == 1 %} (exento){% endif %}
+                {% if d.DscItem is not empty %}<div class="desc">{{ d.DscItem }}</div>{% endif %}
+            </td>
+            {% if hayPrecio %}<td class="num">{{ d.PrcItem is not empty ? m.pesos(d.PrcItem) : '' }}</td>{% endif %}
+            {% if hayCantidad %}<td class="num">{{ d.QtyItem is not empty ? d.QtyItem | number_format(d.QtyItem == d.QtyItem | round ? 0 : 2, ',', '.') : '' }}</td>{% endif %}
+            {% if hayDescuento %}<td class="num">{{ d.DescuentoMonto is not empty ? m.pesos(d.DescuentoMonto) : '$ 0' }}{% if d.DescuentoPct is not empty %} ({{ d.DescuentoPct | number_format(0, ',', '.') }}%){% endif %}</td>{% endif %}
+            <td class="num">{{ m.pesos(d.MontoItem | default(0)) }}</td>
+        </tr>
+    {% endfor %}
+</table>
+<div class="fin-detalle"></div>
+
+{# ── Pie: timbre + sitio de consulta (izquierda) · total (derecha) ── #}
+<div class="pie">
+    {% if monto_palabras is not empty %}
+        <table class="son"><tr><td class="k" valign="top">SON:</td><td>{{ monto_palabras }}</td></tr></table>
+    {% endif %}
+    <table class="pie-tabla">
+        <tr>
+            <td style="width: 52%;" valign="bottom">
+                {% if document_stamp is not empty %}
+                    <table style="width: 100%;">
+                        <tr><td align="center"><img class="img-timbre" src="{{ document_stamp | format_as('billing_document.TED') }}" alt="Timbre Electrónico SII"></td></tr>
+                        <tr><td align="center" class="timbre-leyenda">
+                            Timbre Electrónico SII<br>
+                            {% if document_auth is not empty %}Res. {{ document_auth.numero_resolucion ?? document_auth.NroResol }} de {{ (document_auth.fecha_resolucion ?? document_auth.FchResol) | date('Y') }} - {% endif %}Verifique documento: www.sii.cl
+                        </td></tr>
+                    </table>
+                {% endif %}
+                {% set url_consulta = document_extra.url_consulta_boleta ?? null %}
+                {% if url_consulta is not empty %}
+                <table style="width: 100%;"><tr><td align="center" class="consulta">
+                    Consulte esta boleta en <a href="{{ url_consulta }}" style="text-decoration: none; color: #000080;">{{ url_consulta | replace({'https://': '', 'http://': ''}) }}</a>
+                </td></tr></table>
+                {% endif %}
+            </td>
+            <td style="width: 8%;"></td>
+            <td style="width: 40%;" valign="bottom">
+                {% set lineas = [] %}
+                {% if enc.Totales.MntExe is not empty %}{% set lineas = lineas | merge([['EXENTO ($)', m.pesos(enc.Totales.MntExe)]]) %}{% endif %}
+                {% if enc.Totales.IVA is not empty %}{% set lineas = lineas | merge([['IVA INCLUIDO ($)', m.pesos(enc.Totales.IVA)]]) %}{% endif %}
+                {% set lineas = lineas | merge([['TOTAL ($)', m.pesos(enc.Totales.MntTotal)]]) %}
+                <table class="totales">
+                    {% for l in lineas %}
+                        <tr class="{{ loop.first ? 'primera' : '' }} {{ loop.last ? 'ultima' : '' }} {{ l[0] == 'TOTAL ($)' ? 'total' : '' }}">
+                            <td class="k">{{ l[0] }}</td>
+                            <td class="v">{{ l[1] }}</td>
+                        </tr>
+                    {% endfor %}
+                </table>
+            </td>
+        </tr>
+    </table>
+</div>
+
+</body>
+</html>

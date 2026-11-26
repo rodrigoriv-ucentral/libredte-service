@@ -1,0 +1,26 @@
+{
+    "name": "pasarela-pago/libredte-service",
+    "description": "Microservicio HTTP self-hosted para emitir DTE con libredte-lib-core",
+    "type": "project",
+    "license": "AGPL-3.0-or-later",
+    "require": {
+        "php": "^8.5",
+        "ext-curl": "*",
+        "ext-json": "*",
+        "ext-mbstring": "*",
+        "ext-openssl": "*",
+        "ext-pdo_sqlite": "*",
+        "ext-soap": "*",
+        "libredte/libredte-lib-core": "dev-master"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
